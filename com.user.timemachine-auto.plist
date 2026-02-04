@@ -7,15 +7,15 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/YOUR_USERNAME_HERE/Library/Scripts/timemachine-auto.sh</string>
+        <string>/Users/YOUR_USERNAME/Library/Scripts/timemachine-auto.sh</string>
     </array>
     <key>StartOnMount</key>
     <true/>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME_HERE/Library/Logs/AutoTMLogs/tm-launchd-out.log</string>
+    <string>/Users/YOUR_USERNAME/Library/Logs/AutoTMLogs/tm-launchd-out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME_HERE/Library/Logs/AutoTMLogs/tm-launchd-err.log</string>
+    <string>/Users/YOUR_USERNAME/Library/Logs/AutoTMLogs/tm-launchd-err.log</string>
 </dict>
 </plist>
