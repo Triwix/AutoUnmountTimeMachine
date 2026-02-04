@@ -6,7 +6,7 @@
 # Configuration:
 # - BACKUP_THRESHOLD_DAYS: Minimum days between backups (default: 3)
 # - Runs on disk mount and at login
-# - Logs to: ~/Library/Logs/tm-auto-backup.log
+# - Logs to: ~/Library/Logs/AutoTMLogs/tm-auto-backup.log
 #
 # To disable: launchctl unload ~/Library/LaunchAgents/com.user.timemachine-auto.plist
 # To enable: launchctl load ~/Library/LaunchAgents/com.user.timemachine-auto.plist
