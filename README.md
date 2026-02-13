@@ -1,4 +1,4 @@
-# Time Machine Auto-Backup
+# Time Machine Auto-Unmount After Backup Automation
 
 Behavior:
 - `launchd` triggers a script on login and any volume mount.
