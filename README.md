@@ -1,185 +1,185 @@
-# Time Machine Auto-Unmount After Backup Automation
+# AutoUnmountTM (macOS Time Machine Auto-Unmount)
 
-When a time machine (tm) disk is mounted, an automation is triggered to ask tm if a backup is due per the backup freqeuncy set in macOS's native tm settings, unmounts the disk if unneeded, and if needed, backs up and then unmounts. The purpose of this automation is due to my need for regular backups on my macbook which I also use as desktop via a thunderbolt dock with a tm disk connected to it. However, I didn't want to think about having to unmount everytime I unplug the dock's cable from the macbook, hence, AutoUnmountTimeMachine was born.
+## Purpose
 
-Built with love (and GPT-5.3-Codex Extra High) ❤️
+When a Time Machine disk is mounted, macOS decides whether a backup is due based on native Time Machine scheduling. This automation triggers that decision, waits for backup completion when needed, and then unmounts the Time Machine volume so dock unplugging is safer and less manual.
 
-Behavior:
-- `launchd` triggers a script on login and any volume mount.
-- The script asks macOS to decide backup timing with `tmutil startbackup --auto --block`.
-- If macOS starts (or is already running) a backup, the script waits for completion and then unmounts the disk.
-- If macOS does not start a backup, the script unmounts the Time Machine disk.
+## Behavior Contract
+
+On each trigger run:
+
+1. Detect mounted local Time Machine destination(s).
+2. Ask macOS for the normal backup decision:
+   - `tmutil startbackup --auto --block --destination <ID>`
+3. If backup is running, wait until it finishes.
+4. Unmount the Time Machine volume.
+
+Expected outcomes:
+
+- Backup due: backup runs, script waits, then unmounts.
+- Backup not due: script unmounts.
+- Backup already in progress: script waits, then unmounts.
+
+## How The Automation Actually Runs
+
+- `launchd` watches for mount events (`StartOnMount`).
+- On each mount event, it starts `AutoUnmountTM.swift`.
+- The script runs one full cycle:
+  - ask Time Machine to decide backup (`tmutil startbackup --auto --block`)
+  - wait if backup is running
+  - unmount the Time Machine volume
+- The script exits.
+- On the next mount event, `launchd` starts it again.
+
+This is intentional. No always-running daemon process is required.
+
+## What You Do Once vs What Happens Automatically
+
+You do once:
+
+- Run install commands (copy script + create/load LaunchAgent).
+- Grant Full Disk Access for the launch context.
+
+Then it is automatic:
+
+- Trigger on mount
+- Backup due/not-due decision
+- Wait for backup completion
+- Volume unmount with retries and safety checks
 
 ## Requirements
-- macOS 10.13 (High Sierra) or later
-- Time Machine already configured with at least one local destination
-- Full Disk Access granted to the process running the script (see notes below for more on how and why)
-- Script runs as a per-user LaunchAgent (not a daemon)
 
-## Install
-Use either Finder drag-and-drop or Terminal.
+- macOS with Time Machine configured
+- At least one local Time Machine destination
+- `swift`, `tmutil`, `diskutil`, `launchctl`
+- Full Disk Access granted to the relevant run context
 
-<details>
+## Install + Enable Automation (Copy/Paste)
 
-<summary> Option A: Finder (Drag-and-Drop)</summary>
-
-1. Open the folder containing these files:
-   - `timemachine-auto.sh`
-   - `com.user.timemachine-auto.plist`
-2. In Finder, press `Shift+Command+G` and open: `~/Library/Scripts`
-   - Create the folder if it does not exist.
-3. Drag `timemachine-auto.sh` into `~/Library/Scripts/`.
-4. In Finder, press `Shift+Command+G` and open: `~/Library/LaunchAgents`
-   - Create the folder if it does not exist.
-5. Drag `com.user.timemachine-auto.plist` into `~/Library/LaunchAgents/`.
-6. Open Terminal and run:
-```bash
-chmod +x "$HOME/Library/Scripts/timemachine-auto.sh"
-```
-7. Load the LaunchAgent:
-```bash
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.timemachine-auto.plist"
-```
-</details>
-
-<details>
-
-<summary>Option B: Terminal</summary>
-- Important: run these commands from the directory that contains this README, `timemachine-auto.sh`, and `com.user.timemachine-auto.plist`.
+Run these commands from the directory that contains `AutoUnmountTM.swift`:
 
 ```bash
-# Go to folder with script + plist
-cd "/path/to/folder-containing-these-files"
-
-# Create script destination folder if missing
+# 1) Install script into user Library
 mkdir -p "$HOME/Library/Scripts"
+cp ./AutoUnmountTM.swift "$HOME/Library/Scripts/AutoUnmountTM.swift"
+chmod +x "$HOME/Library/Scripts/AutoUnmountTM.swift"
 
-# Copy script
-cp ./timemachine-auto.sh "$HOME/Library/Scripts/timemachine-auto.sh"
-
-# Make script executable
-chmod +x "$HOME/Library/Scripts/timemachine-auto.sh"
-
-# Create LaunchAgent folder if missing
+# 2) Write LaunchAgent
 mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/com.user.autounmounttm.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.autounmounttm</string>
 
-# Install plist
-cp ./com.user.timemachine-auto.plist "$HOME/Library/LaunchAgents/com.user.timemachine-auto.plist"
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec /usr/bin/swift "$HOME/Library/Scripts/AutoUnmountTM.swift"</string>
+  </array>
 
-# Load LaunchAgent (Automates the triggering of timemachine-auto.sh)
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.timemachine-auto.plist"
+  <key>StartOnMount</key>
+  <true/>
 
-# Unload LaunchAgent (Disable the auto triggering of timemachine-auto.sh)
-launchctl bootout "gui/$(id -u)"/com.user.timemachine-auto 2>/dev/null || true
+  <key>RunAtLoad</key>
+  <true/>
 
-# Optional: This command just ensures if the LaunchAgent is enabled
-launchctl enable "gui/$(id -u)"/com.user.timemachine-auto
+  <key>StandardOutPath</key>
+  <string>/tmp/AutoUnmountTM.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/AutoUnmountTM.log</string>
+</dict>
+</plist>
+PLIST
+
+# 3) Reload agent cleanly
+launchctl bootout "gui/$(id -u)"/com.user.autounmounttm 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.user.autounmounttm.plist"
+launchctl enable "gui/$(id -u)"/com.user.autounmounttm
+
+# 4) Verify loaded
+launchctl print "gui/$(id -u)"/com.user.autounmounttm
+
+# 5) Optional immediate test run (does not wait for next mount event)
+launchctl kickstart -k "gui/$(id -u)/com.user.autounmounttm"
 ```
-</details>
 
-## Things to be aware of
-#### Full Disk Access
-- Grant Full Disk Access in System Settings -> Privacy & Security -> Full Disk Access. Add entries based on how you run the script:
-  - Manual runs: add your terminal app (Terminal, iTerm, etc.).
-  - Automatic LaunchAgent runs: add `/bin/bash` (the .plist runs the script through `/bin/bash`).
-- I know this sounds scary, but I couldn't find a way to get it to work right without it, feel free to audit both scripts for safety!
-- After adding entries:
-  - Ensure each toggle is ON.
-  - Quit and reopen the added app(s).
-  - Reload the LaunchAgent (bootout/bootstrap) before re-testing.
-- Common related errors in logs:
-  - `Operation not permitted`
-  - `Full Disk Access`
-  - `not authorized`
-  - `access denied`
+## Full Disk Access (Critical)
 
-#### Multiple Destinations
-- This script is designed for single local Time Machine destination setups. If you have multiple local destinations:
-  - Set `PREFERRED_DESTINATION_ID` to the one you want managed.
-  - Get IDs with `tmutil destinationinfo`.
-- If you have network destinations (iCloud, Time Capsule, NAS):
-  - The script waits for ANY backup to complete, not only local disk backup.
-  - This is safe but may keep local disk mounted longer than necessary.
+Grant Full Disk Access to the process context that runs the script. If using the LaunchAgent above, add and enable:
 
-#### StartOnMount Note
-- `StartOnMount` triggers for all mounted volumes (USB, DMG, network, etc.).
-- The script exits quickly when the configured local Time Machine disk is not mounted.
+- `/bin/zsh`
+- `/usr/bin/swift`
 
-#### First Run vs Later Runs
-- First run after mount evaluates destination, runs macOS auto decision, waits if needed, then unmounts.
-- If another instance is already running, lock protection makes the new trigger exit.
-- If a stale lock exists without a PID and is at least 60 seconds old, the script reclaims it and continues.
+Then restart affected apps/session and reload the LaunchAgent.
 
-## Configuration
+## Configuration (in `AutoUnmountTM.swift`)
 
-### Script Configuration (`timemachine-auto.sh`)
-User config block:
-- `PREFERRED_DESTINATION_ID=""`
-  - Optional destination UUID. Get destination IDs with `tmutil destinationinfo`. Leave empty to auto-select when exactly one local destination is configured.
-  - Rules: Must be a full UUID format: `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX` (hex digits). If format is invalid, script logs an error, shows a notification, and exits
-- `BACKUP_POLL_SECONDS=15`
-  - Poll interval while checking backup status.
-- `BACKUP_MAX_WAIT_SECONDS=43200`
-  - Maximum total wait for an active backup before leaving disk mounted.
-- `POST_BACKUP_SETTLE_SECONDS=10`
-  - Delay after backup completes before unmount, to let final I/O settle.
-- `UNMOUNT_RETRY_ATTEMPTS=3`
-  - Number of unmount retries before failure.
-- `LOCK_STALE_SECONDS=21600`
-  - Lock age threshold before a stale lock is reclaimed.
-- `LOCK_REFRESH_SECONDS=600`
-  - How often to refresh lock metadata while waiting in long-running loops.
+- `preferredDestinationID`: optional UUID pinning when multiple local TM destinations exist
+- `backupPollSeconds`: polling interval while waiting for running backup
+- `backupMaxWaitSeconds`: max wait for completion before fail-safe exit
+- `startBackupRetryCount`: additional retries after initial `startbackup` attempt
+- `retryDelaySeconds`: delay between retries
+- `unmountRetryAttempts`: unmount retries
+- `lockPath`: single-instance lock file path
 
-Backward compatibility:
-- If `EJECT_RETRY_ATTEMPTS` is set, it overrides `UNMOUNT_RETRY_ATTEMPTS`.
+## Manual Run (One-Off)
 
-Logging behavior:
-- Log file rotates at 1 MiB.
-- Up to 3 rotated files are kept (`.1`, `.2`, `.3`).
-
-### Configuration Examples
-Default (good for most users):
 ```bash
-PREFERRED_DESTINATION_ID=""
-BACKUP_POLL_SECONDS=15
-BACKUP_MAX_WAIT_SECONDS=43200
-POST_BACKUP_SETTLE_SECONDS=10
-UNMOUNT_RETRY_ATTEMPTS=3
-LOCK_STALE_SECONDS=21600
-LOCK_REFRESH_SECONDS=600
+/usr/bin/swift "$HOME/Library/Scripts/AutoUnmountTM.swift"
 ```
 
-Less frequent status polling:
+## Troubleshooting (Symptom -> Cause -> Fix)
+
+- `Operation not permitted`, `not authorized`, `access denied`, `Full Disk Access`
+  - Cause: missing FDA permissions
+  - Fix: grant FDA for launch context binaries and reload agent
+
+- `The backup disk is not available`
+  - Cause: disk mounted but not recognized as configured TM destination, or destination config mismatch
+  - Fix: verify with `tmutil destinationinfo -X`, confirm TM settings, remount disk
+
+- Unmount fails
+  - Cause: files/processes still using mount
+  - Fix: `lsof +D "/Volumes/<YourTMVolumeName>"` and close blockers
+
+- Agent appears idle
+  - Cause: waiting for mount event, not a continuous daemon loop
+  - Fix: `launchctl kickstart -k "gui/$(id -u)/com.user.autounmounttm"` for immediate run
+
+## Logs and Diagnostics
+
 ```bash
-BACKUP_POLL_SECONDS=30
+# Agent status
+launchctl print "gui/$(id -u)"/com.user.autounmounttm
+
+# Follow the single runtime log file
+tail -f /tmp/AutoUnmountTM.log
+
+# Time Machine visibility checks
+tmutil destinationinfo -X
+tmutil status -X
 ```
 
-Very large first backup:
+Console note:
+
+- Console.app "Log Reports" is for crash/diagnostic reports, not this runtime log file.
+- This automation writes operational logs to `/tmp/AutoUnmountTM.log`.
+
+
+## Uninstall
+
 ```bash
-BACKUP_MAX_WAIT_SECONDS=86400
-LOCK_STALE_SECONDS=86400
+launchctl bootout "gui/$(id -u)"/com.user.autounmounttm 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.user.autounmounttm.plist"
+rm -f "$HOME/Library/Scripts/AutoUnmountTM.swift"
+rm -f /tmp/AutoUnmountTM.log
 ```
 
-## Troubleshooting
-```bash
-# Check LaunchAgent status
-launchctl print "gui/$(id -u)"/com.user.timemachine-auto
+## Important Note
 
-# Check running script process
-ps aux | grep '[t]imemachine-auto.sh'
-
-# Follow logs live with this command, open the log file itself, or find it in Console.app -> Log Reports -> tm-auto-backup.log
-tail -f "$HOME/Library/Logs/AutoTMLogs/tm-auto-backup.log"
-
-# Manual one-off test run
-"$HOME/Library/Scripts/timemachine-auto.sh"
-
-# Find open files blocking unmount
-lsof +D "/Volumes/<YourTMVolumeName>"
-
-# Reset state file
-rm -f "$HOME/Library/Application Support/TimeMachineAuto/last-processed-mount.state"
-
-# Clear lock if needed
-rm -rf "$HOME/Library/Caches/com.user.timemachine-auto.lock"
-```
+This automation unmounts the Time Machine volume. It does not eject every device/volume connected to a dock. If other mounted devices remain active, macOS may still show unplug warnings for those devices.
